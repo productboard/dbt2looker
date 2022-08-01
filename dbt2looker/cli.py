@@ -118,6 +118,7 @@ def run():
     lookml_views = [
         generator.lookml_view_from_dbt_model(model, adapter_type)
         for model in typed_dbt_models
+        if model.name.startswith(('sat_', 'satc_', 'link_', 'satl_', 'hub_', 'ls_'))
     ]
     pathlib.Path(os.path.join(args.output_dir, 'views')).mkdir(parents=True, exist_ok=True)
     for view in lookml_views:
@@ -126,13 +127,15 @@ def run():
 
     logging.info(f'Generated {len(lookml_views)} lookml views in {os.path.join(args.output_dir, "views")}')
 
-    # Generate Lookml models
-    lookml_models = [
-        generator.lookml_model_from_dbt_model(model, dbt_project_config.name)
-        for model in typed_dbt_models
-    ]
-    for model in lookml_models:
-        with open(os.path.join(args.output_dir, model.filename), 'w') as f:
-            f.write(model.contents)
-    logging.info(f'Generated {len(lookml_models)} lookml models in {args.output_dir}')
+    # # Generate Lookml models
+    # lookml_models = [
+    #     generator.lookml_model_from_dbt_model(model, dbt_project_config.name)
+    #     for model in typed_dbt_models
+    # ]
+    # for model in lookml_models:
+    #     with open(os.path.join(args.output_dir, model.filename), 'w') as f:
+    #         f.write(model.contents)
+    # logging.info(f'Generated {len(lookml_models)} lookml models in {args.output_dir}')
+
+
     logging.info('Success')

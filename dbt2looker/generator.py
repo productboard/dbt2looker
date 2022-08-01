@@ -203,8 +203,9 @@ def map_adapter_type_to_looker(adapter_type: models.SupportedDbtAdapters, column
 def lookml_date_time_dimension_group(column: models.DbtModelColumn, adapter_type: models.SupportedDbtAdapters):
     return {
         'name': column.meta.dimension.name or column.name,
+        'label': column.name.capitalize().replace("_", " "),
         'type': 'time',
-        'sql': column.meta.dimension.sql or f'${{TABLE}}.{column.name}',
+        'sql': column.meta.dimension.sql or f'${{TABLE}}."{column.name}"',
         'description': column.meta.dimension.description or column.description,
         'datatype': map_adapter_type_to_looker(adapter_type, column.data_type),
         'timeframes': ['raw', 'time', 'hour', 'date', 'week', 'month', 'quarter', 'year']
@@ -214,8 +215,9 @@ def lookml_date_time_dimension_group(column: models.DbtModelColumn, adapter_type
 def lookml_date_dimension_group(column: models.DbtModelColumn, adapter_type: models.SupportedDbtAdapters):
     return {
         'name': column.meta.dimension.name or column.name,
+        'label': column.name.capitalize().replace("_", " "),
         'type': 'time',
-        'sql': column.meta.dimension.sql or f'${{TABLE}}.{column.name}',
+        'sql': column.meta.dimension.sql or f'${{TABLE}}."{column.name}"',
         'description': column.meta.dimension.description or column.description,
         'datatype': map_adapter_type_to_looker(adapter_type, column.data_type),
         'timeframes': ['raw', 'date', 'week', 'month', 'quarter', 'year']
@@ -241,13 +243,19 @@ def lookml_dimensions_from_model(model: models.DbtModel, adapter_type: models.Su
     return [
         {
             'name': column.meta.dimension.name or column.name,
+            'label': column.name.capitalize().replace("_", " "),
             'type': map_adapter_type_to_looker(adapter_type, column.data_type),
-            'sql': column.meta.dimension.sql or f'${{TABLE}}.{column.name}',
+            'sql': column.meta.dimension.sql or f'${{TABLE}}."{column.name}"',
             'description': column.meta.dimension.description or column.description,
             **(
                 {'value_format_name': column.meta.dimension.value_format_name.value}
                 if (column.meta.dimension.value_format_name
                     and map_adapter_type_to_looker(adapter_type, column.data_type) == 'number')
+                else {}
+            ),
+            **(
+                {'bypass_suggest_restrictions': 'yes'}
+                if map_adapter_type_to_looker(adapter_type, column.data_type) == 'string'
                 else {}
             )
         }
@@ -301,14 +309,73 @@ def lookml_measure(measure_name: str, column: models.DbtModelColumn, measure: mo
     return m
 
 
+def is_dv_column(column_name):
+    exclude = ['hash_key', 'valid_to', 'valid_from']
+    if any(e in column_name for e in exclude) or column_name == 'id' or column_name == 'source':
+        return True
+
+    return False
+
+
+def gen_business_fields(model_name, dimensions, dimension_groups):
+    if not model_name.startswith('sat'):
+        return []
+
+    dims = []
+
+    for d in dimensions:
+        if is_dv_column(d['name']):
+            continue
+        dims.append(d['name'])
+
+    for d in dimension_groups:
+        if is_dv_column(d['name']):
+            continue
+        if (d['datatype'] == 'timestamp' or d['datatype'] == 'time' or d['datatype'] == 'date') and 'timeframes' in d:
+            for tf in d['timeframes']:
+                dims.append(f"{d['name']}_{tf}")
+
+    return dims
+
+
 def lookml_view_from_dbt_model(model: models.DbtModel, adapter_type: models.SupportedDbtAdapters):
+
+    extends = ''
+    if model.name.startswith('sat'):
+        extends = 'dv_sat_base'
+    elif model.name.startswith('hub'):
+        extends = 'dv_hub_base'
+    elif model.name.startswith('link'):
+        extends = 'dv_link_base'
+
+    dim_groups = []
+    dims = []
+
+    for d in lookml_dimension_groups_from_model(model, adapter_type):
+        if not is_dv_column(d['name']):
+            dim_groups.append(d)
+
+    for d in lookml_dimensions_from_model(model, adapter_type):
+        if not is_dv_column(d['name']):
+            dims.append(d)
+
+    business_fields = gen_business_fields(model.name, dims, dim_groups)
+
     lookml = {
         'view': {
             'name': model.name,
-            'sql_table_name': model.relation_name,
-            'dimension_groups': lookml_dimension_groups_from_model(model, adapter_type),
-            'dimensions': lookml_dimensions_from_model(model, adapter_type),
+            'sql_table_name': f'MAIN."{model.name}"',
+            'extends': [extends],
+            'sets': [
+                {
+                    'fields': business_fields,
+                    'name': 'business_fields'
+                }
+            ],
+            'dimension_groups': dim_groups,
+            'dimensions': dims,
             'measures': lookml_measures_from_model(model),
+
         }
     }
     logging.debug(

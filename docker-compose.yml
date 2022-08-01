@@ -1,0 +1,14 @@
+version: '3.0'
+
+
+services:
+
+  dbt2looker:
+    build: .
+    volumes:
+      - ./:/dbt2looker
+      - ../pb-looker:/pb-looker
+      - ../pb-dbt:/pb-dbt
+    entrypoint: /bin/zsh
+    environment:
+      - DBT_PROFILES_DIR=/dbt
